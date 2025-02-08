@@ -21,15 +21,12 @@ commands:
   - name: "Memory Usage"
     command: "netstat -an | grep ESTABLISHED"
     repeat: 2
-  - name: "Memory Usage"
-    command: "netstat -an | grep ESTABLISHED"
-    repeat: 2
 ```
 
 run with:
 
 ```shell
-$> ./swissknife -cfg=./commands.yaml
+$> ./swissknife -cfg=./commands.2.yaml,./commands.1.yaml
 ```
 
 ## ui
