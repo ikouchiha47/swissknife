@@ -4,118 +4,90 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
+	"log"
 	"os/exec"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
-// Command struct to hold the command details
+// Command represents a single command
 type Command struct {
 	Name      string
 	Command   string
-	Repeat    int // Repeat interval in seconds (0 means run once)
+	Repeat    int // Interval in seconds for repeating jobs (0 = run once)
 	Output    string
 	Status    string
 	IsRunning bool
 }
 
-// Group struct to group commands
+// Group represents a group of commands
 type Group struct {
 	Repeating    []*Command
 	NonRepeating []*Command
 }
 
-// ExecuteCommand runs the actual shell command and updates the Command struct
-func executeCommand(cmd *Command, mu *sync.Mutex) {
-	var outputBuf bytes.Buffer
-
-	// Run the command
-	command := exec.Command("sh", "-c", cmd.Command)
-	command.Stdout = &outputBuf
-	command.Stderr = &outputBuf
-
-	err := command.Run()
-	status := "Completed"
-	if err != nil {
-		status = "Failed"
-	}
-
-	// Update the Command struct
-	mu.Lock()
-	cmd.Output = outputBuf.String()
-	cmd.Status = status
-	mu.Unlock()
+// AppState holds the app's state
+type AppState struct {
+	Groups      []*Group
+	TextViews   [][]*tview.TextView
+	CancelFuncs map[[2]int]context.CancelFunc
+	Mu          sync.Mutex
 }
 
-// RunCommand executes commands based on their repeat settings
-func RunCommand(ctx context.Context, cmd *Command, wg *sync.WaitGroup, mu *sync.Mutex) {
-	defer wg.Done()
-
-	if cmd.Repeat > 0 {
-		// Repeating command
-		ticker := time.NewTicker(time.Duration(cmd.Repeat) * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				// Exit on context cancellation
-				return
-			case <-ticker.C:
-				executeCommand(cmd, mu)
-			}
-		}
-	} else {
-		// One-time command
-		executeCommand(cmd, mu)
-	}
-}
-
-// RefreshDisplay periodically clears the terminal and prints the grouped output
-func RefreshDisplay(ctx context.Context, groups []*Group, mu *sync.Mutex) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
+// ExecuteCommand runs the command and updates the output
+func ExecuteCommand(ctx context.Context, cmd *Command, output *tview.TextView, mu *sync.Mutex, app *tview.Application) {
 	for {
 		select {
 		case <-ctx.Done():
-			// Exit on context cancellation
+			// Stop execution if the context is canceled
+			// mu.Lock()
+			// cmd.Status = "Killed"
+			// cmd.Output = "Job terminated."
+			// content := fmt.Sprintf("Command: %s\nStatus: %s\nOutput:\n%s", cmd.Command, cmd.Status, cmd.Output)
+			// mu.Unlock()
+			// app.QueueUpdateDraw(func() {
+			// 	output.SetText(content)
+			// })
+			log.Println("cancelling", cmd.Command)
 			return
-		case <-ticker.C:
-			// Clear the screen (ANSI escape sequence)
-			fmt.Print("\033[H\033[2J")
+		default:
+			var outputBuf bytes.Buffer
+			execCmd := exec.Command("sh", "-c", cmd.Command)
+			execCmd.Stdout = &outputBuf
+			execCmd.Stderr = &outputBuf
+			err := execCmd.Run()
 
-			// Print each group
-			for i, group := range groups {
-				fmt.Printf("Group %d:\n", i+1)
+			status := "Completed"
+			if err != nil {
+				status = "Failed"
+			}
 
-				// Repeating commands (vertically stacked)
-				fmt.Println("Repeating Commands:")
-				for _, cmd := range group.Repeating {
-					mu.Lock()
-					fmt.Printf("Command: %s\nStatus: %s\n\nOutput:\n%s\n\n%s\n",
-						cmd.Command, cmd.Status, cmd.Output, "----------------------------------------")
-					mu.Unlock()
-				}
+			// Update the command's output and status
+			mu.Lock()
+			cmd.Output = outputBuf.String()
+			cmd.Status = status
+			content := fmt.Sprintf("Command: %s\nStatus: %s\nOutput:\n%s", cmd.Command, cmd.Status, cmd.Output)
+			mu.Unlock()
 
-				// Non-repeating commands (horizontally split)
-				fmt.Println("Non-Repeating Commands:")
-				mu.Lock()
-				for _, cmd := range group.NonRepeating {
-					fmt.Printf("\nCommand: %s\nStatus: %s\nOutput:\n%s\n", cmd.Command, cmd.Status, cmd.Output)
-					fmt.Println("************************************")
-				}
-				mu.Unlock()
+			// Refresh the TextView on the UI thread
+			app.QueueUpdateDraw(func() {
+				output.SetText(content)
+			})
 
-				fmt.Println("\n========================================\n")
+			// Sleep if the job is repeating
+			if cmd.Repeat > 0 {
+				time.Sleep(time.Duration(cmd.Repeat) * time.Second)
+			} else {
+				return
 			}
 		}
 	}
 }
 
-// GroupCommands groups commands into logical groups based on the requirements
+// GroupCommands groups commands into logical groups
 func GroupCommands(commands []*Command) []*Group {
 	var groups []*Group
 	var repeating []*Command
@@ -146,83 +118,134 @@ func GroupCommands(commands []*Command) []*Group {
 			nonRepeating = nonRepeating[1:]
 		}
 
-		// Add the group to the list
 		groups = append(groups, group)
 	}
 
 	return groups
 }
 
-func main() {
-	// Define the commands
-	commands := []*Command{
-		{
-			Name:    "df",
-			Command: "df -kh",
-			Repeat:  5, // Repeat every 5 seconds
-		},
-		{
-			Name:    "lsof",
-			Command: "lsof | grep ESTABLISHED",
-			Repeat:  0, // Run once
-		},
-		{
-			Name:    "uptime",
-			Command: "uptime",
-			Repeat:  0, // Run once
-		},
-		{
-			Name:    "free",
-			Command: "free -h",
-			Repeat:  5, // Repeat every 5 seconds
-		},
-		{
-			Name:    "whoami",
-			Command: "whoami",
-			Repeat:  0, // Run once
-		},
+// CreateGroupedFlex initializes a grouped layout for the app
+func CreateGroupedFlex(state *AppState) []*tview.Flex {
+	groups := []*tview.Flex{}
+
+	for groupIndex, group := range state.Groups {
+		groupFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+
+		// Initialize the sub-slice for this group
+		state.TextViews[groupIndex] = make([]*tview.TextView, 0)
+
+		// Add repeating commands (vertically stacked)
+		for _, cmd := range group.Repeating {
+			textView := tview.NewTextView().
+				SetDynamicColors(true)
+
+			textView.SetBorder(true)
+			textView.SetTitle(fmt.Sprintf("Repeating: %s", cmd.Name))
+			textView.SetBorderColor(tcell.ColorWhite)
+
+			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
+			groupFlex.AddItem(textView, 0, 1, false)
+		}
+
+		// Add non-repeating commands (horizontally stacked)
+		nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
+		for _, cmd := range group.NonRepeating {
+			textView := tview.NewTextView().
+				SetDynamicColors(true)
+
+			textView.SetBorder(true)
+			textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
+			textView.SetBorderColor(tcell.ColorWhite)
+
+			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
+			nonRepeatingFlex.AddItem(textView, 0, 1, false)
+		}
+
+		groupFlex.AddItem(nonRepeatingFlex, 0, 1, false)
+		groups = append(groups, groupFlex)
 	}
 
-	// Group the commands
+	return groups
+}
+
+// CreateApp initializes the TUI application
+func CreateApp(state *AppState, groups []*tview.Flex, cancel context.CancelFunc) *tview.Application {
+	app := tview.NewApplication()
+
+	// Create a Flex layout for vertical stacking
+	rootFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+	for _, groupItem := range groups {
+		rootFlex.AddItem(groupItem, 0, 1, false)
+	}
+
+	// Handle key events
+	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Rune() {
+		case 'q':
+			cancel()
+			app.Stop() // Quit the application
+		}
+		return event
+	})
+
+	app.SetRoot(rootFlex, true)
+	return app
+}
+
+func main() {
+	// Define commands
+	commands := []*Command{
+		{Name: "df", Command: "df -kh", Repeat: 5},
+		{Name: "date", Command: "date", Repeat: 1},     // Dynamically updating time
+		{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
+		{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
+	}
+
+	// Group commands
 	groups := GroupCommands(commands)
 
-	// Mutex to handle concurrent writes to the Command struct
-	var mu sync.Mutex
+	// Initialize app state
+	state := &AppState{
+		Groups:      groups,
+		TextViews:   make([][]*tview.TextView, len(groups)), // Create slices for groups
+		CancelFuncs: make(map[[2]int]context.CancelFunc),
+	}
 
-	// WaitGroup to manage Goroutines
+	// Initialize grouped layout
+	groupItems := CreateGroupedFlex(state)
+
+	// Create the application
+
+	// Start executing commands
+	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
-	// Context to handle cancellation
-	ctx, cancel := context.WithCancel(context.Background())
+	app := CreateApp(state, groupItems, cancel)
 
-	// Signal handling for graceful shutdown
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	for groupIndex, group := range groups {
+		for paneIndex, cmd := range append(group.Repeating, group.NonRepeating...) {
+			wg.Add(1)
 
-	// Start the commands
-	for _, group := range groups {
-		for _, cmd := range group.Repeating {
-			wg.Add(1)
-			go RunCommand(ctx, cmd, &wg, &mu)
-		}
-		for _, cmd := range group.NonRepeating {
-			wg.Add(1)
-			go RunCommand(ctx, cmd, &wg, &mu)
+			childCtx, childCancel := context.WithCancel(ctx)
+			state.CancelFuncs[[2]int{groupIndex, paneIndex}] = childCancel
+
+			go func(cx context.Context, cmd *Command, groupIndex, paneIndex int) {
+				defer wg.Done()
+				ExecuteCommand(cx, cmd, state.TextViews[groupIndex][paneIndex], &state.Mu, app)
+			}(childCtx, cmd, groupIndex, paneIndex)
 		}
 	}
 
-	// Start the display refresh
-	go RefreshDisplay(ctx, groups, &mu)
+	// Run the TUI
+	go func() {
+		if err := app.Run(); err != nil {
+			panic(err)
+		}
+		cancel() // Cancel all running commands when the app exits
+	}()
 
-	// Wait for termination signal
-	<-signalChan
-	fmt.Println("\nShutting down...")
-
-	// Cancel the context to stop all Goroutines
-	cancel()
-
-	// Wait for all Goroutines to finish
+	fmt.Println("Waiting for clean exit")
+	// Wait for all tasks to complete
 	wg.Wait()
-
 	fmt.Println("All tasks completed. Exiting.")
 }
