@@ -1,0 +1,10 @@
+commands:
+  - name: "Current User"
+    command: "whoami"
+    repeat: 0
+  - name: "Current User"
+    command: "whoami"
+    repeat: 0
+  - name: "Memory Usage"
+    command: "netstat -an | grep ESTABLISHED"
+    repeat: 2

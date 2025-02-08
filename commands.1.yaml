@@ -1,0 +1,7 @@
+commands:
+  - name: "Disk Usage"
+    command: "df -kh"
+    repeat: 5
+  - name: "Current Date"
+    command: "date"
+    repeat: 1
