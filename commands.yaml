@@ -1,11 +1,21 @@
 commands:
   - name: "Disk Usage"
-    command: "df -h"
-    repeat: 5  # Repeat every 5 seconds (0 means run once)
+    command: "df -kh"
+    repeat: 5
+  - name: "Current Date"
+    command: "date"
+    repeat: 1 
+  - name: "Current User"
+    command: "whoami"
+    repeat: 0
+  - name: "Current User"
+    command: "whoami"
+    repeat: 0
   - name: "Memory Usage"
-    command: "free -h"
-    repeat: 10
-  - name: "List Processes"
-    command: "ps aux"
-    repeat: 0  # Run once
+    command: "netstat -an | grep ESTABLISHED"
+    repeat: 2
+  - name: "Memory Usage"
+    command: "netstat -an | grep ESTABLISHED"
+    repeat: 2
+
 

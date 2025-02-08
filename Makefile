@@ -1,3 +1,3 @@
 run:
 	go build -o swissknife main.go
-	./swissknife ./commands.yaml
+	./swissknife -cfg=./commands.yaml

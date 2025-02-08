@@ -3,14 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"gopkg.in/yaml.v3"
 )
 
 // Command represents a single command
@@ -35,6 +38,21 @@ type AppState struct {
 	TextViews   [][]*tview.TextView
 	CancelFuncs map[[2]int]context.CancelFunc
 	Mu          sync.Mutex
+}
+
+func init() {
+	// Open or create a log file
+	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
+	if err != nil {
+		fmt.Printf("Failed to open log file: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Set the log output to the file
+	log.SetOutput(logFile)
+
+	// Optional: Add log timestamp and file line number for easier debugging
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
 
 // ExecuteCommand runs the command and updates the output
@@ -65,10 +83,16 @@ func ExecuteCommand(ctx context.Context, cmd *Command, output *tview.TextView, m
 				status = "Failed"
 			}
 
+			// log.Println("out", err, outputBuf.String())
 			// Update the command's output and status
 			mu.Lock()
-			cmd.Output = outputBuf.String()
 			cmd.Status = status
+
+			if err != nil {
+				cmd.Status = err.Error()
+			} else {
+				cmd.Output = outputBuf.String()
+			}
 			content := fmt.Sprintf("Command: %s\nStatus: %s\nOutput:\n%s", cmd.Command, cmd.Status, cmd.Output)
 			mu.Unlock()
 
@@ -125,43 +149,102 @@ func GroupCommands(commands []*Command) []*Group {
 }
 
 // CreateGroupedFlex initializes a grouped layout for the app
+// func CreateGroupedFlex(state *AppState) []*tview.Flex {
+// 	groups := []*tview.Flex{}
+//
+// 	for groupIndex, group := range state.Groups {
+// 		log.Printf("Creating group %d with %d repeating and %d non-repeating commands\n",
+// 			groupIndex, len(group.Repeating), len(group.NonRepeating))
+//
+// 		groupFlex := tview.NewFlex().SetDirection(tview.FlexRow)
+//
+// 		// Initialize the sub-slice for this group
+// 		state.TextViews[groupIndex] = make([]*tview.TextView, 0)
+//
+// 		// Add repeating commands (vertically stacked)
+// 		for _, cmd := range group.Repeating {
+// 			textView := tview.NewTextView().
+// 				SetDynamicColors(true)
+//
+// 			textView.SetBorder(true)
+// 			textView.SetTitle(fmt.Sprintf("Repeating: %s", cmd.Name))
+// 			textView.SetBorderColor(tcell.ColorWhite)
+//
+// 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
+//
+// 			groupFlex.AddItem(textView, 0, 1, false)
+// 		}
+//
+// 		// Add non-repeating commands (horizontally stacked)
+// 		nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
+// 		for _, cmd := range group.NonRepeating {
+// 			textView := tview.NewTextView().
+// 				SetDynamicColors(true)
+//
+// 			textView.SetBorder(true)
+// 			textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
+// 			textView.SetBorderColor(tcell.ColorWhite)
+//
+// 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
+// 			nonRepeatingFlex.AddItem(textView, 0, 1, false)
+// 		}
+//
+// 		groupFlex.AddItem(nonRepeatingFlex, 0, 1, false)
+// 		groups = append(groups, groupFlex)
+// 	}
+//
+// 	return groups
+// }
+
 func CreateGroupedFlex(state *AppState) []*tview.Flex {
 	groups := []*tview.Flex{}
 
 	for groupIndex, group := range state.Groups {
+		log.Printf("Creating group %d with %d repeating and %d non-repeating commands\n",
+			groupIndex, len(group.Repeating), len(group.NonRepeating))
+
+		// Group-level flex container (vertical stacking)
 		groupFlex := tview.NewFlex().SetDirection(tview.FlexRow)
 
 		// Initialize the sub-slice for this group
 		state.TextViews[groupIndex] = make([]*tview.TextView, 0)
 
-		// Add repeating commands (vertically stacked)
+		// Add repeating commands (each in its own row)
 		for _, cmd := range group.Repeating {
 			textView := tview.NewTextView().
 				SetDynamicColors(true)
 
 			textView.SetBorder(true)
 			textView.SetTitle(fmt.Sprintf("Repeating: %s", cmd.Name))
-			textView.SetBorderColor(tcell.ColorWhite)
+			textView.SetBorderColor(tcell.ColorGreen)
 
 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
-			groupFlex.AddItem(textView, 0, 1, false)
+			groupFlex.AddItem(textView, 0, 1, false) // Each repeating command gets a row
 		}
 
-		// Add non-repeating commands (horizontally stacked)
-		nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
-		for _, cmd := range group.NonRepeating {
-			textView := tview.NewTextView().
-				SetDynamicColors(true)
+		// Add non-repeating commands (2 per row)
+		if len(group.NonRepeating) > 0 {
+			nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
+			for i, cmd := range group.NonRepeating {
+				textView := tview.NewTextView().
+					SetDynamicColors(true)
 
-			textView.SetBorder(true)
-			textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
-			textView.SetBorderColor(tcell.ColorWhite)
+				textView.SetBorder(true)
+				textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
+				textView.SetBorderColor(tcell.ColorBlue)
 
-			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
-			nonRepeatingFlex.AddItem(textView, 0, 1, false)
+				state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
+				nonRepeatingFlex.AddItem(textView, 0, 1, false)
+
+				// Every 2 commands, finalize the row and start a new one
+				if (i+1)%2 == 0 || i == len(group.NonRepeating)-1 {
+					groupFlex.AddItem(nonRepeatingFlex, 0, 1, false)
+					nonRepeatingFlex = tview.NewFlex().SetDirection(tview.FlexColumn)
+				}
+			}
 		}
 
-		groupFlex.AddItem(nonRepeatingFlex, 0, 1, false)
+		// Add the group to the main layout
 		groups = append(groups, groupFlex)
 	}
 
@@ -192,14 +275,64 @@ func CreateApp(state *AppState, groups []*tview.Flex, cancel context.CancelFunc)
 	return app
 }
 
-func main() {
-	// Define commands
-	commands := []*Command{
-		{Name: "df", Command: "df -kh", Repeat: 5},
-		{Name: "date", Command: "date", Repeat: 1},     // Dynamically updating time
-		{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
-		{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
+type YAMLCommand struct {
+	Name    string `yaml:"name"`
+	Command string `yaml:"command"`
+	Repeat  int    `yaml:"repeat"`
+}
+
+type YAMLConfig struct {
+	Commands []YAMLCommand `yaml:"commands"`
+}
+
+// LoadCommandsFromYAML parses the YAML file and returns a list of commands
+func LoadCommandsFromYAML(filename string) ([]*Command, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open YAML file: %v", err)
 	}
+	defer file.Close()
+
+	var config YAMLConfig
+	decoder := yaml.NewDecoder(file)
+	if err := decoder.Decode(&config); err != nil {
+		return nil, fmt.Errorf("failed to decode YAML file: %v", err)
+	}
+
+	var commands []*Command
+	for _, yamlCmd := range config.Commands {
+		commands = append(commands, &Command{
+			Name:    yamlCmd.Name,
+			Command: yamlCmd.Command,
+			Repeat:  yamlCmd.Repeat,
+		})
+	}
+
+	return commands, nil
+}
+
+func main() {
+	var filePath string
+
+	flag.StringVar(&filePath, "cfg", "", "provide the commands config yaml")
+	flag.Parse()
+
+	if filePath == "" {
+		log.Fatal("no commands file provided")
+	}
+
+	commands, err := LoadCommandsFromYAML(filePath)
+	if err != nil {
+		log.Fatal(fmt.Errorf("failed to decode yaml. error %v", err))
+	}
+
+	// Define commands
+	// commands := []*Command{
+	// 	{Name: "df", Command: "df -kh", Repeat: 5},
+	// 	{Name: "date", Command: "date", Repeat: 1},     // Dynamically updating time
+	// 	{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
+	// 	{Name: "whoami", Command: "whoami", Repeat: 0}, // Run once
+	// }
 
 	// Group commands
 	groups := GroupCommands(commands)
@@ -212,7 +345,6 @@ func main() {
 	}
 
 	// Initialize grouped layout
-	groupItems := CreateGroupedFlex(state)
 
 	// Create the application
 
@@ -220,7 +352,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 
+	groupItems := CreateGroupedFlex(state)
 	app := CreateApp(state, groupItems, cancel)
+	// grid := CreateGroupedGrid(state)
+	// app := CreateGridApp(state, grid, cancel)
 
 	for groupIndex, group := range groups {
 		for paneIndex, cmd := range append(group.Repeating, group.NonRepeating...) {
