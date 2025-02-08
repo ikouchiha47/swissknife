@@ -41,18 +41,20 @@ type AppState struct {
 }
 
 func init() {
-	// Open or create a log file
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	isDebug := os.Getenv("DEBUG") == "1"
+	if !isDebug {
+		return
+	}
+
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
 		fmt.Printf("Failed to open log file: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Set the log output to the file
 	log.SetOutput(logFile)
-
-	// Optional: Add log timestamp and file line number for easier debugging
-	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 }
 
 // ExecuteCommand runs the command and updates the output
