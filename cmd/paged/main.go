@@ -72,7 +72,7 @@ func ExecuteCommand(ctx context.Context, cmd *Command, output *tview.TextView, m
 			// app.QueueUpdateDraw(func() {
 			// 	output.SetText(content)
 			// })
-			log.Println("cancelling", cmd.Command)
+			// log.Println("cancelling", cmd.Command)
 			return
 		default:
 			var outputBuf bytes.Buffer
@@ -81,9 +81,9 @@ func ExecuteCommand(ctx context.Context, cmd *Command, output *tview.TextView, m
 			execCmd.Stderr = &outputBuf
 			err := execCmd.Run()
 
-			status := "Completed"
+			status := fmt.Sprintf("Completed: %s", time.Now().Format(time.RFC1123))
 			if err != nil {
-				status = "Failed"
+				status = fmt.Sprintf("Failed: %s", time.Now().Format(time.RFC1123))
 			}
 
 			// log.Println("out", err, outputBuf.String())
@@ -151,54 +151,6 @@ func GroupCommands(commands []*Command) []*Group {
 	return groups
 }
 
-// CreateGroupedFlex initializes a grouped layout for the app
-// func CreateGroupedFlex(state *AppState) []*tview.Flex {
-// 	groups := []*tview.Flex{}
-//
-// 	for groupIndex, group := range state.Groups {
-// 		log.Printf("Creating group %d with %d repeating and %d non-repeating commands\n",
-// 			groupIndex, len(group.Repeating), len(group.NonRepeating))
-//
-// 		groupFlex := tview.NewFlex().SetDirection(tview.FlexRow)
-//
-// 		// Initialize the sub-slice for this group
-// 		state.TextViews[groupIndex] = make([]*tview.TextView, 0)
-//
-// 		// Add repeating commands (vertically stacked)
-// 		for _, cmd := range group.Repeating {
-// 			textView := tview.NewTextView().
-// 				SetDynamicColors(true)
-//
-// 			textView.SetBorder(true)
-// 			textView.SetTitle(fmt.Sprintf("Repeating: %s", cmd.Name))
-// 			textView.SetBorderColor(tcell.ColorWhite)
-//
-// 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
-//
-// 			groupFlex.AddItem(textView, 0, 1, false)
-// 		}
-//
-// 		// Add non-repeating commands (horizontally stacked)
-// 		nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
-// 		for _, cmd := range group.NonRepeating {
-// 			textView := tview.NewTextView().
-// 				SetDynamicColors(true)
-//
-// 			textView.SetBorder(true)
-// 			textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
-// 			textView.SetBorderColor(tcell.ColorWhite)
-//
-// 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
-// 			nonRepeatingFlex.AddItem(textView, 0, 1, false)
-// 		}
-//
-// 		groupFlex.AddItem(nonRepeatingFlex, 0, 1, false)
-// 		groups = append(groups, groupFlex)
-// 	}
-//
-// 	return groups
-// }
-
 func CreateGroupedFlex(state *AppState) []*tview.Flex {
 	groups := []*tview.Flex{}
 
@@ -218,7 +170,7 @@ func CreateGroupedFlex(state *AppState) []*tview.Flex {
 				SetDynamicColors(true)
 
 			textView.SetBorder(true)
-			textView.SetTitle(fmt.Sprintf("Repeating: %s", cmd.Name))
+			textView.SetTitle(fmt.Sprintf("Syncing: %s", cmd.Name))
 			textView.SetBorderColor(tcell.ColorGreen)
 
 			state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
@@ -233,7 +185,7 @@ func CreateGroupedFlex(state *AppState) []*tview.Flex {
 					SetDynamicColors(true)
 
 				textView.SetBorder(true)
-				textView.SetTitle(fmt.Sprintf("Non-Repeating: %s", cmd.Name))
+				textView.SetTitle(fmt.Sprintf("Command %s", cmd.Name))
 				textView.SetBorderColor(tcell.ColorBlue)
 
 				state.TextViews[groupIndex] = append(state.TextViews[groupIndex], textView)
@@ -432,11 +384,11 @@ func main() {
 			app.Stop()
 		case 'n': // Next page
 			page := cursor.next()
-			log.Println("next page", page)
+			// log.Println("next page", page)
 			pages.SwitchToPage(fmt.Sprintf("file-%d", page))
 		case 'p': // Previous page
 			page := cursor.prev()
-			log.Println("prev page", page)
+			// log.Println("prev page", page)
 			pages.SwitchToPage(fmt.Sprintf("file-%d", page))
 		}
 		return event

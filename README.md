@@ -29,6 +29,11 @@ run with:
 $> ./swissknife -cfg=./commands.2.yaml,./commands.1.yaml
 ```
 
+browsing:
+
+- Use keys `n`, `p`, to traverse pages when using multiple yaml files
+- Use `q` to quit
+
 ## ui
 
 ![screenshot](./screenshot.png)
