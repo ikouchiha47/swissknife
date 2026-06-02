@@ -167,7 +167,8 @@ func CreateGroupedFlex(state *AppState) []*tview.Flex {
 		// Add repeating commands (each in its own row)
 		for _, cmd := range group.Repeating {
 			textView := tview.NewTextView().
-				SetDynamicColors(true)
+				SetDynamicColors(true).
+				SetScrollable(true)
 
 			textView.SetBorder(true)
 			textView.SetTitle(fmt.Sprintf("Syncing: %s", cmd.Name))
@@ -182,7 +183,8 @@ func CreateGroupedFlex(state *AppState) []*tview.Flex {
 			nonRepeatingFlex := tview.NewFlex().SetDirection(tview.FlexColumn)
 			for i, cmd := range group.NonRepeating {
 				textView := tview.NewTextView().
-					SetDynamicColors(true)
+					SetDynamicColors(true).
+					SetScrollable(true)
 
 				textView.SetBorder(true)
 				textView.SetTitle(fmt.Sprintf("Command %s", cmd.Name))
@@ -322,6 +324,10 @@ func main() {
 
 	cursor := newPaginator(int32(len(files)))
 
+	// pageTextViews[pageIndex] = flat list of all TextViews on that page, for focus cycling
+	pageTextViews := make(map[int][]*tview.TextView)
+	focusedPane := make(map[int]int) // pageIndex -> currently focused pane index
+
 	// Process each file
 	for fileIndex, filePath := range files {
 		// Load commands from YAML
@@ -360,6 +366,14 @@ func main() {
 		}
 		pages.AddPage(fmt.Sprintf("file-%d", fileIndex), page, true, fileIndex == 0)
 
+		// Flatten all TextViews for this page so we can Tab through them
+		var flatViews []*tview.TextView
+		for _, row := range state.TextViews {
+			flatViews = append(flatViews, row...)
+		}
+		pageTextViews[fileIndex] = flatViews
+		focusedPane[fileIndex] = -1 // no pane focused initially
+
 		// Execute commands for this file
 		for groupIndex, group := range groups {
 			for paneIndex, cmd := range append(group.Repeating, group.NonRepeating...) {
@@ -376,20 +390,54 @@ func main() {
 		}
 	}
 
+	setFocusedPane := func(pageIdx, paneIdx int) {
+		tvs := pageTextViews[pageIdx]
+		if len(tvs) == 0 {
+			return
+		}
+		// Unfocus previously focused pane
+		prev := focusedPane[pageIdx]
+		if prev >= 0 && prev < len(tvs) {
+			tvs[prev].SetBorderAttributes(tcell.AttrNone)
+		}
+		focusedPane[pageIdx] = paneIdx
+		tv := tvs[paneIdx]
+		tv.SetBorderAttributes(tcell.AttrBold)
+		app.SetFocus(tv)
+	}
+
 	// Set up navigation between pages
 	pages.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		pageIdx := int(cursor.current)
+		switch event.Key() {
+		case tcell.KeyTab:
+			tvs := pageTextViews[pageIdx]
+			if len(tvs) > 0 {
+				next := (focusedPane[pageIdx] + 1) % len(tvs)
+				setFocusedPane(pageIdx, next)
+			}
+			return nil
+		case tcell.KeyBacktab:
+			tvs := pageTextViews[pageIdx]
+			if len(tvs) > 0 {
+				prev := (focusedPane[pageIdx] - 1 + len(tvs)) % len(tvs)
+				setFocusedPane(pageIdx, prev)
+			}
+			return nil
+		}
 		switch event.Rune() {
 		case 'q':
 			cancel()
 			app.Stop()
 		case 'n': // Next page
 			page := cursor.next()
-			// log.Println("next page", page)
 			pages.SwitchToPage(fmt.Sprintf("file-%d", page))
+			// Reset focus to pages when switching
+			app.SetFocus(pages)
 		case 'p': // Previous page
 			page := cursor.prev()
-			// log.Println("prev page", page)
 			pages.SwitchToPage(fmt.Sprintf("file-%d", page))
+			app.SetFocus(pages)
 		}
 		return event
 	})
